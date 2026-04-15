@@ -1,0 +1,266 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Elec Shop - E-commerce Backend (API Gateway + Lambda + DynamoDB + Cognito)
+
+Globals:
+  Function:
+    Runtime: nodejs18.x
+    Timeout: 30
+    MemorySize: 256
+    Environment:
+      Variables:
+        PRODUCTS_TABLE: !Ref ProductsTable
+        ORDERS_TABLE: !Ref OrdersTable
+        STRIPE_SECRET_KEY: !Ref StripeSecretKey
+
+Parameters:
+  StripeSecretKey:
+    Type: String
+    Description: Stripe secret key (test mode)
+    Default: sk_test_XXXXXXXXXXXXXXXXXXXXXXXX
+    NoEcho: true
+
+Resources:
+  # ==================== Cognito ====================
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: ElecShopUserPool
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          RequireUppercase: true
+      Schema:
+        - Name: email
+          Required: true
+          Mutable: true
+        - Name: name
+          Required: false
+          Mutable: true
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: ElecShopWebClient
+      UserPoolId: !Ref UserPool
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+      GenerateSecret: false
+
+  # ==================== DynamoDB ====================
+  ProductsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ElecShop-Products
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: category
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: CategoryIndex
+          KeySchema:
+            - AttributeName: category
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  OrdersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: ElecShop-Orders
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: UserIdIndex
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  # ==================== API Gateway ====================
+  ApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: ElecShopAPI
+      StageName: prod
+      Cors:
+        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowOrigin: "'*'"
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt UserPool.Arn
+
+  # ==================== Lambda Functions ====================
+  GetProductsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: products.getAll
+      CodeUri: lambda/
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
+      Events:
+        GetProducts:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /products
+            Method: GET
+            Auth:
+              Authorizer: NONE
+
+  GetProductByIdFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: products.getById
+      CodeUri: lambda/
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref ProductsTable
+      Events:
+        GetProduct:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /products/{id}
+            Method: GET
+            Auth:
+              Authorizer: NONE
+
+  CreateOrderFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: orders.create
+      CodeUri: lambda/
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref OrdersTable
+      Events:
+        CreateOrder:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /orders
+            Method: POST
+
+  GetOrdersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: orders.getByUser
+      CodeUri: lambda/
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref OrdersTable
+      Events:
+        GetOrders:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /orders
+            Method: GET
+
+  CreatePaymentIntentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: payments.createIntent
+      CodeUri: lambda/
+      Events:
+        CreatePayment:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /payments/create-intent
+            Method: POST
+
+  # ==================== CloudWatch Dashboard ====================
+  MonitoringDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: ElecShop-Monitoring
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "properties": {
+                "title": "API Gateway Requests",
+                "metrics": [
+                  ["AWS/ApiGateway", "Count", "ApiName", "ElecShopAPI"]
+                ],
+                "period": 300,
+                "stat": "Sum"
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "title": "Lambda Errors",
+                "metrics": [
+                  ["AWS/Lambda", "Errors", "FunctionName", "${GetProductsFunction}"],
+                  ["AWS/Lambda", "Errors", "FunctionName", "${CreateOrderFunction}"],
+                  ["AWS/Lambda", "Errors", "FunctionName", "${CreatePaymentIntentFunction}"]
+                ],
+                "period": 300,
+                "stat": "Sum"
+              }
+            },
+            {
+              "type": "metric",
+              "properties": {
+                "title": "DynamoDB Read/Write",
+                "metrics": [
+                  ["AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "ElecShop-Products"],
+                  ["AWS/DynamoDB", "ConsumedWriteCapacityUnits", "TableName", "ElecShop-Orders"]
+                ],
+                "period": 300,
+                "stat": "Sum"
+              }
+            }
+          ]
+        }
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod
+
+  UserPoolId:
+    Description: Cognito User Pool ID
+    Value: !Ref UserPool
+
+  UserPoolClientId:
+    Description: Cognito User Pool Client ID
+    Value: !Ref UserPoolClient
+
+  ProductsTableName:
+    Description: DynamoDB Products table
+    Value: !Ref ProductsTable
+
+  OrdersTableName:
+    Description: DynamoDB Orders table
+    Value: !Ref OrdersTable
