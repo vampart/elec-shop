@@ -16,8 +16,7 @@ Globals:
 Parameters:
   StripeSecretKey:
     Type: String
-    Description: Stripe secret key (test mode)
-    Default: sk_test_XXXXXXXXXXXXXXXXXXXXXXXX
+    Description: Stripe secret key (test mode) - provide via parameter, do not hardcode
     NoEcho: true
 
 Resources:
