@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import * as authService from '../services/auth';
+import { registerUser, getUserProfile } from '../services/api';
 
 const AuthContext = createContext(null);
 
@@ -15,8 +16,17 @@ export const AuthProvider = ({ children }) => {
 
   const checkUser = useCallback(async () => {
     try {
-      const userData = await authService.getCurrentUser();
-      setUser(userData);
+      const cognitoUser = await authService.getCurrentUser();
+      if (cognitoUser) {
+        try {
+          const dbProfile = await getUserProfile();
+          setUser({ ...cognitoUser, ...dbProfile });
+        } catch {
+          setUser(cognitoUser);
+        }
+      } else {
+        setUser(null);
+      }
     } catch {
       setUser(null);
     } finally {
@@ -42,19 +52,30 @@ export const AuthProvider = ({ children }) => {
     return authService.confirmSignUp(email, code);
   };
 
+  const saveUserToDb = async (email, name) => {
+    try {
+      const cognitoUser = await authService.getCurrentUser();
+      const cognitoSub = cognitoUser?.sub || cognitoUser?.username;
+      await registerUser({ email, name, cognitoSub });
+    } catch (err) {
+      if (!err.message?.includes('already exists')) {
+        console.error('Failed to save user to DB:', err);
+      }
+    }
+  };
+
   const logout = () => {
     authService.signOut();
     setUser(null);
   };
 
-  // Demo login for development without Cognito
   const demoLogin = (email, name) => {
     setUser({ email, name, username: email, demo: true });
   };
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, login, register, confirmRegistration, logout, demoLogin }}
+      value={{ user, loading, login, register, confirmRegistration, saveUserToDb, logout, demoLogin }}
     >
       {children}
     </AuthContext.Provider>

@@ -12,7 +12,7 @@ const Auth = () => {
   const [confirmCode, setConfirmCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { login, register, confirmRegistration, demoLogin } = useAuth();
+  const { login, register, confirmRegistration, saveUserToDb, demoLogin } = useAuth();
   const navigate = useNavigate();
 
   const handleLogin = async (e) => {
@@ -31,7 +31,12 @@ const Auth = () => {
 
   const handleConfirm = async (e) => {
     e.preventDefault(); setError(''); setLoading(true);
-    try { await confirmRegistration(email, confirmCode); await login(email, password); navigate('/'); }
+    try {
+      await confirmRegistration(email, confirmCode);
+      await login(email, password);
+      await saveUserToDb(email, name);
+      navigate('/');
+    }
     catch (err) { setError(err.message || 'Confirmation failed.'); }
     finally { setLoading(false); }
   };

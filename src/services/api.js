@@ -22,6 +22,25 @@ const authFetch = async (path, options = {}) => {
   return response.json();
 };
 
+// Users API
+export const registerUser = (userData) => {
+  return authFetch('/users/register', {
+    method: 'POST',
+    body: JSON.stringify(userData),
+  });
+};
+
+export const getUserProfile = () => {
+  return authFetch('/users/me');
+};
+
+export const updateUserProfile = (profileData) => {
+  return authFetch('/users/me', {
+    method: 'PUT',
+    body: JSON.stringify(profileData),
+  });
+};
+
 // Products API
 export const getProducts = (category) => {
   const query = category ? `?category=${encodeURIComponent(category)}` : '';

@@ -11,6 +11,7 @@ Globals:
       Variables:
         PRODUCTS_TABLE: !Ref ProductsTable
         ORDERS_TABLE: !Ref OrdersTable
+        USERS_TABLE: !Ref UsersTable
         STRIPE_SECRET_KEY: !Ref StripeSecretKey
 
 Parameters:
@@ -98,23 +99,73 @@ Resources:
           Projection:
             ProjectionType: ALL
 
-  # ==================== API Gateway ====================
-  ApiGateway:
-    Type: AWS::Serverless::Api
+  UsersTable:
+    Type: AWS::DynamoDB::Table
     Properties:
-      Name: ElecShopAPI
-      StageName: prod
-      Cors:
-        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
-        AllowHeaders: "'Content-Type,Authorization'"
-        AllowOrigin: "'*'"
-      Auth:
-        DefaultAuthorizer: CognitoAuthorizer
-        Authorizers:
-          CognitoAuthorizer:
-            UserPoolArn: !GetAtt UserPool.Arn
+      TableName: ElecShop-Users
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: EmailIndex
+          KeySchema:
+            - AttributeName: email
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
 
   # ==================== Lambda Functions ====================
+  RegisterUserFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: users.register
+      CodeUri: lambda/
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+      Events:
+        RegisterUser:
+          Type: Api
+          Properties:
+            Path: /users/register
+            Method: POST
+
+  GetUserProfileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: users.getProfile
+      CodeUri: lambda/
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref UsersTable
+      Events:
+        GetProfile:
+          Type: Api
+          Properties:
+            Path: /users/me
+            Method: GET
+
+  UpdateUserProfileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: users.updateProfile
+      CodeUri: lambda/
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+      Events:
+        UpdateProfile:
+          Type: Api
+          Properties:
+            Path: /users/me
+            Method: PUT
+
   GetProductsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -127,11 +178,8 @@ Resources:
         GetProducts:
           Type: Api
           Properties:
-            RestApiId: !Ref ApiGateway
             Path: /products
             Method: GET
-            Auth:
-              Authorizer: NONE
 
   GetProductByIdFunction:
     Type: AWS::Serverless::Function
@@ -145,11 +193,8 @@ Resources:
         GetProduct:
           Type: Api
           Properties:
-            RestApiId: !Ref ApiGateway
             Path: /products/{id}
             Method: GET
-            Auth:
-              Authorizer: NONE
 
   CreateOrderFunction:
     Type: AWS::Serverless::Function
@@ -163,7 +208,6 @@ Resources:
         CreateOrder:
           Type: Api
           Properties:
-            RestApiId: !Ref ApiGateway
             Path: /orders
             Method: POST
 
@@ -179,7 +223,6 @@ Resources:
         GetOrders:
           Type: Api
           Properties:
-            RestApiId: !Ref ApiGateway
             Path: /orders
             Method: GET
 
@@ -192,74 +235,25 @@ Resources:
         CreatePayment:
           Type: Api
           Properties:
-            RestApiId: !Ref ApiGateway
             Path: /payments/create-intent
             Method: POST
-
-  # ==================== CloudWatch Dashboard ====================
-  MonitoringDashboard:
-    Type: AWS::CloudWatch::Dashboard
-    Properties:
-      DashboardName: ElecShop-Monitoring
-      DashboardBody: !Sub |
-        {
-          "widgets": [
-            {
-              "type": "metric",
-              "properties": {
-                "title": "API Gateway Requests",
-                "metrics": [
-                  ["AWS/ApiGateway", "Count", "ApiName", "ElecShopAPI"]
-                ],
-                "period": 300,
-                "stat": "Sum"
-              }
-            },
-            {
-              "type": "metric",
-              "properties": {
-                "title": "Lambda Errors",
-                "metrics": [
-                  ["AWS/Lambda", "Errors", "FunctionName", "${GetProductsFunction}"],
-                  ["AWS/Lambda", "Errors", "FunctionName", "${CreateOrderFunction}"],
-                  ["AWS/Lambda", "Errors", "FunctionName", "${CreatePaymentIntentFunction}"]
-                ],
-                "period": 300,
-                "stat": "Sum"
-              }
-            },
-            {
-              "type": "metric",
-              "properties": {
-                "title": "DynamoDB Read/Write",
-                "metrics": [
-                  ["AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "ElecShop-Products"],
-                  ["AWS/DynamoDB", "ConsumedWriteCapacityUnits", "TableName", "ElecShop-Orders"]
-                ],
-                "period": 300,
-                "stat": "Sum"
-              }
-            }
-          ]
-        }
 
 Outputs:
   ApiEndpoint:
     Description: API Gateway endpoint URL
-    Value: !Sub https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod
-
+    Value: !Sub https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod
   UserPoolId:
     Description: Cognito User Pool ID
     Value: !Ref UserPool
-
   UserPoolClientId:
     Description: Cognito User Pool Client ID
     Value: !Ref UserPoolClient
-
+  UsersTableName:
+    Description: DynamoDB Users table
+    Value: !Ref UsersTable
   ProductsTableName:
     Description: DynamoDB Products table
     Value: !Ref ProductsTable
-
   OrdersTableName:
     Description: DynamoDB Orders table
     Value: !Ref OrdersTable

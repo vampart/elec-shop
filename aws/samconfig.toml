@@ -1,0 +1,10 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "elec-shop-backend"
+resolve_s3 = true
+s3_prefix = "elec-shop-backend"
+region = "us-east-1"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = false
+parameter_overrides = "StripeSecretKey=sk_test_placeholder_replace_with_real_key"
